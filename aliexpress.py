@@ -5,22 +5,32 @@ import plotly.express as px
 
 st.set_page_config(page_title="Sistema de Importação", layout="wide")
 
-# Conectando diretamente (O Streamlit cuidará da chave se ela estiver correta no Secrets)
-try:
-    conn = st.connection("gsheets", type=GSheetsConnection)
-except Exception as e:
-    st.error("Erro na conexão. Verifique se os Secrets estão preenchidos corretamente.")
-    st.stop()
+# --- FUNÇÃO DE CONEXÃO ROBUSTA ---
+def conectar():
+    # Pegamos os dados do segredo e transformamos em um dicionário comum
+    creds = st.secrets["connections"]["gsheets"].to_dict()
+    # Limpeza profunda da chave privada
+    if "private_key" in creds:
+        # Remove caracteres de escape de texto e garante quebras de linha reais
+        cleaned_key = creds["private_key"].replace("\\n", "\n").strip()
+        creds["private_key"] = cleaned_key
+    
+    # Injetamos as credenciais limpas diretamente na conexão
+    return st.connection("gsheets", type=GSheetsConnection, **creds)
 
+# Inicializa a conexão corrigida
+conn = conectar()
+
+# --- COLOQUE SUA URL ABAIXO ---
 URL_PLANILHA = "SUA_URL_DA_PLANILHA_AQUI"
 
 def carregar_dados(aba):
     try:
-        # Forçamos o cache em 0 para os dados atualizarem sempre
         return conn.read(spreadsheet=URL_PLANILHA, worksheet=aba, ttl=0)
     except:
         return pd.DataFrame()
 
+# --- LÓGICA DE LOGIN / SISTEMA ---
 if 'logged_in' not in st.session_state:
     st.session_state['logged_in'] = False
 
@@ -35,72 +45,56 @@ if not st.session_state['logged_in']:
         if st.button("Entrar"):
             df_usuarios = carregar_dados("usuarios")
             if not df_usuarios.empty and user in df_usuarios['usuario'].values:
-                # Localiza a senha e converte para string para comparar
-                linha_user = df_usuarios[df_usuarios['usuario'] == user]
-                senha_correta = str(linha_user['senha'].values[0])
-                if pw == senha_correta:
+                linha = df_usuarios[df_usuarios['usuario'] == user]
+                if pw == str(linha['senha'].values[0]):
                     st.session_state['logged_in'] = True
                     st.session_state['username'] = user
                     st.rerun()
-            st.error("Usuário ou senha inválidos.")
-
+            st.error("Dados incorretos.")
     else:
         st.title("📝 Cadastro")
-        novo_nome = st.text_input("Nome Completo")
-        novo_user = st.text_input("Usuário (Login)")
-        nova_pw = st.text_input("Senha", type="password")
-        if st.button("Finalizar Cadastro"):
-            df_usuarios = carregar_dados("usuarios")
-            novo_registro = pd.DataFrame([{"nome": novo_nome, "usuario": novo_user, "senha": nova_pw}])
-            df_final = pd.concat([df_usuarios, novo_registro], ignore_index=True)
-            conn.update(spreadsheet=URL_PLANILHA, worksheet="usuarios", data=df_final)
-            st.success("Cadastro realizado! Mude para Login.")
-
+        n_nome = st.text_input("Nome")
+        n_user = st.text_input("Usuário")
+        n_pw = st.text_input("Senha", type="password")
+        if st.button("Cadastrar"):
+            df_u = carregar_dados("usuarios")
+            novo = pd.DataFrame([{"nome": n_nome, "usuario": n_user, "senha": n_pw}])
+            df_f = pd.concat([df_u, novo], ignore_index=True)
+            conn.update(spreadsheet=URL_PLANILHA, worksheet="usuarios", data=df_f)
+            st.success("Sucesso! Vá para Login.")
 else:
-    st.sidebar.write(f"Usuário: **{st.session_state.username}**")
-    if st.sidebar.button("Sair"):
-        st.session_state.logged_in = False
-        st.rerun()
+    st.sidebar.button("Sair", on_click=lambda: st.session_state.update({"logged_in": False}))
+    st.title(f"🚢 Painel de {st.session_state.username}")
 
-    st.title("🚢 Controle de Importações")
-
-    with st.expander("➕ Registrar Novo Item", expanded=True):
-        c1, c2, c3 = st.columns([3, 1, 1])
-        nome_p = c1.text_input("Produto")
-        custo_u = c2.number_input("Custo (R$)", min_value=0.0)
-        quant = c3.number_input("Qtd", min_value=1)
-        margem = st.slider("Margem (%)", 0, 100, 25)
+    # Formulário
+    with st.expander("Novo Registro"):
+        c1, c2, c3 = st.columns(3)
+        prod = c1.text_input("Produto")
+        custo = c2.number_input("Custo Unit.", min_value=0.0)
+        qtd = c3.number_input("Qtd", min_value=1)
+        margem = st.slider("Margem %", 0, 100, 25)
         
-        invest = custo_u * quant
-        venda_u = custo_u * (1 + margem/100)
-        lucro_e = (venda_u - custo_u) * quant
+        invest = custo * qtd
+        venda = custo * (1 + margem/100)
+        lucro = (venda - custo) * qtd
 
-        if st.button("Salvar Registro"):
+        if st.button("Salvar"):
             df_d = carregar_dados("dados")
-            nova_l = pd.DataFrame([{
-                "produto": nome_p, "custo": custo_u, "quantidade": quant,
-                "margem": margem, "investimento": invest, "lucro": lucro_e,
-                "usuario": st.session_state.username
-            }])
-            df_at = pd.concat([df_d, nova_l], ignore_index=True)
-            conn.update(spreadsheet=URL_PLANILHA, worksheet="dados", data=df_at)
-            st.success("Salvo!")
+            nova_l = pd.DataFrame([{"produto": prod, "custo": custo, "quantidade": qtd, "margem": margem, "investimento": invest, "lucro": lucro, "usuario": st.session_state.username}])
+            conn.update(spreadsheet=URL_PLANILHA, worksheet="dados", data=pd.concat([df_d, nova_l], ignore_index=True))
             st.rerun()
 
+    # Dashboard
     st.divider()
     m1, m2, m3 = st.columns(3)
     m1.metric("Investimento", f"R$ {invest:,.2f}")
-    m2.metric("Venda Unit.", f"R$ {venda_u:,.2f}")
-    m3.metric("Lucro Est.", f"R$ {lucro_e:,.2f}")
+    m2.metric("Venda Unit.", f"R$ {venda:,.2f}")
+    m3.metric("Lucro", f"R$ {lucro:,.2f}")
 
-    # Gráfico simples
-    c_data = pd.DataFrame({"Cat": ["Custo", "Lucro"], "Val": [max(0.1, invest), max(0.1, lucro_e)]})
-    fig = px.pie(c_data, values='Val', names='Cat', hole=0.4, color_discrete_sequence=['#EF553B', '#00CC96'])
+    fig = px.pie(values=[max(0.1, invest), max(0.1, lucro)], names=["Custo", "Lucro"], hole=0.4)
     st.plotly_chart(fig)
 
     st.subheader("📋 Meus Itens")
     df_g = carregar_dados("dados")
-    if not df_g.empty and 'usuario' in df_g.columns:
+    if not df_g.empty:
         st.dataframe(df_g[df_g['usuario'] == st.session_state.username], use_container_width=True)
-    else:
-        st.info("Nenhum item encontrado.")
