@@ -77,14 +77,13 @@ if not st.session_state['logged_in']:
             df_u = carregar_dados("usuarios")
             novo_u = pd.concat([df_u, pd.DataFrame([{"nome": nome, "usuario": user, "senha": senha}])], ignore_index=True)
             if salvar_dados(novo_u, "usuarios"):
-                st.success("Cadastrado com sucesso!")
+                st.success("Cadastrado com sucesso! Faz login.")
 
 else:
     # --- ÁREA LOGADA ---
     st.sidebar.button("Sair", on_click=lambda: st.session_state.update({"logged_in": False}))
     st.title(f"🚢 Controle de Importações: {st.session_state.username}")
 
-    # Aba para Adicionar Itens
     tab1, tab2 = st.tabs(["➕ Adicionar Novo", "🗑️ Gerir Inventário"])
 
     with tab1:
@@ -100,52 +99,68 @@ else:
             if submit:
                 invest_total = p_custo * p_qtd
                 lucro_total = (p_venda * p_qtd) - invest_total
-                margem = (lucro_total / (p_venda * p_qtd) * 100) if p_venda > 0 else 0
+                margem = (lucro_total / (p_venda * p_qtd) * 100) if (p_venda * p_qtd) > 0 else 0
                 
                 df_d = carregar_dados("dados")
                 nova_linha = pd.DataFrame([{
                     "produto": p_nome, "custo": p_custo, "quantidade": p_qtd, 
                     "venda": p_venda, "margem": f"{margem:.2f}%", 
-                    "investimento": invest_total, "lucro": lucro_total, 
+                    "investimento": float(invest_total), "lucro": float(lucro_total), 
                     "usuario": st.session_state.username
                 }])
                 if salvar_dados(pd.concat([df_d, nova_linha], ignore_index=True), "dados"):
-                    st.success("Salvo!")
+                    st.success("Dados Gravados!")
                     st.rerun()
 
-    # NOVA FUNCIONALIDADE: DELETAR ITENS
     with tab2:
-        st.subheader("Remover Itens do Sistema")
+        st.subheader("Remover Itens")
         df_g = carregar_dados("dados")
-        
         if not df_g.empty:
-            # Filtra apenas os itens do usuário atual
             meus_itens = df_g[df_g['usuario'] == st.session_state.username]
-            
             if not meus_itens.empty:
-                item_para_deletar = st.selectbox("Selecione o produto para apagar:", meus_itens['produto'].unique())
-                
+                item_para_deletar = st.selectbox("Escolha o item para apagar:", meus_itens['produto'].unique())
                 if st.button("❌ Confirmar Exclusão", type="primary"):
-                    # Remove a linha onde o usuário e o produto coincidem
                     df_final = df_g.drop(df_g[(df_g['usuario'] == st.session_state.username) & (df_g['produto'] == item_para_deletar)].index)
-                    
                     if salvar_dados(df_final, "dados"):
-                        st.warning(f"O produto '{item_para_deletar}' foi removido.")
+                        st.warning(f"Item '{item_para_deletar}' removido!")
                         st.rerun()
-            else:
-                st.info("Não tens itens para apagar.")
-        else:
-            st.info("Planilha vazia.")
 
     st.divider()
     
-    # EXIBIÇÃO FINAL
-    st.subheader("📋 Teus Lançamentos")
+    # --- EXIBIÇÃO E GRÁFICO CORRIGIDO ---
     df_visualizar = carregar_dados("dados")
     if not df_visualizar.empty:
         meus_dados = df_visualizar[df_visualizar['usuario'] == st.session_state.username]
-        st.dataframe(meus_dados, use_container_width=True)
         
         if not meus_dados.empty:
-            fig = px.bar(meus_dados, x="produto", y=["investimento", "lucro"], barmode="group", title="Resumo Financeiro")
+            # Garante que as colunas financeiras são números
+            meus_dados["investimento"] = pd.to_numeric(meus_dados["investimento"])
+            meus_dados["lucro"] = pd.to_numeric(meus_dados["lucro"])
+
+            st.subheader("📋 Teus Lançamentos")
+            st.dataframe(meus_dados, use_container_width=True)
+
+            # --- CORREÇÃO DO GRÁFICO ---
+            # Transformamos o DF para o formato longo (Melt) para o Plotly ler os VALORES no eixo Y
+            df_plot = meus_dados.melt(
+                id_vars=["produto"], 
+                value_vars=["investimento", "lucro"],
+                var_name="Indicador", 
+                value_name="Valor_RS"
+            )
+
+            fig = px.bar(
+                df_plot, 
+                x="produto", 
+                y="Valor_RS", # Agora o Y é o valor em dinheiro
+                color="Indicador", 
+                barmode="group",
+                title="Comparativo Financeiro: Investimento vs Lucro (R$)",
+                labels={"Valor_RS": "Valor em Reais (R$)", "produto": "Produto"},
+                color_discrete_map={"investimento": "#EF553B", "lucro": "#00CC96"}
+            )
+            
+            fig.update_layout(yaxis_tickprefix="R$ ", yaxis_tickformat=",.2f")
             st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info("Ainda não tens dados registados.")
