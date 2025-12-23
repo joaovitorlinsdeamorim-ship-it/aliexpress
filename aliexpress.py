@@ -5,43 +5,57 @@ import json
 import base64
 import re
 
-def carregar_dados(aba_nome):
+# Configuração da página sempre no topo para evitar erros de renderização
+st.set_page_config(page_title="Sistema Perigo Imports", layout="wide")
+
+def carregar_credenciais():
     try:
-        # Pega a string do segredo
+        # Recupera a string Base64 do seu campo 'gcp_base64' nos secrets
         raw_b64 = st.secrets["gcp_base64"]
         
-        # Limpeza pesada: remove espaços, quebras de linha ou aspas acidentais
-        # que possam ter vindo na colagem do código gigante
+        # Limpeza pesada para garantir que nenhum caractere invisível quebre o Base64
         clean_b64 = re.sub(r'[^a-zA-Z0-9+/=]', '', raw_b64)
         
-        # Decodifica de Base64 para Texto (JSON)
+        # Decodifica de Base64 para JSON puro
         decoded_bytes = base64.b64decode(clean_b64)
         json_str = decoded_bytes.decode('utf-8')
-        
-        # Transforma o texto em dicionário para o Google
-        creds_dict = json.loads(json_str)
-        
-        s = Spread(st.secrets["spreadsheet_url"], config=creds_dict, sheet=aba_nome)
+        return json.loads(json_str)
+    except Exception as e:
+        st.error(f"Erro ao processar segredos: {e}")
+        return None
+
+def carregar_dados(aba_nome):
+    creds = carregar_credenciais()
+    if not creds:
+        return pd.DataFrame()
+    
+    try:
+        url = st.secrets["spreadsheet_url"]
+        s = Spread(url, config=creds, sheet=aba_nome)
         return s.df
     except Exception as e:
-        st.error(f"Erro de conexão: {e}")
-        # Retorna estrutura mínima para não travar o Login/Cadastro
-        if aba_nome == "usuarios":
-            return pd.DataFrame(columns=["nome", "usuario", "senha"])
+        st.warning(f"Aba '{aba_nome}' não encontrada ou erro de acesso: {e}")
         return pd.DataFrame()
 
-# A função de salvar segue a mesma lógica de decodificação
-def salvar_dados(df_novo, aba_nome):
-    try:
-        raw_b64 = st.secrets["gcp_base64"]
-        clean_b64 = re.sub(r'[^a-zA-Z0-9+/=]', '', raw_b64)
-        json_str = base64.b64decode(clean_b64).decode('utf-8')
-        creds_dict = json.loads(json_str)
-        
-        s = Spread(st.secrets["spreadsheet_url"], config=creds_dict, sheet=aba_nome)
-        s.df = df_novo
-        s.save_to_sheet(index=False, replace=True)
-        return True
-    except Exception as e:
-        st.error(f"Erro ao salvar: {e}")
-        return False
+# --- INTERFACE ---
+
+st.title("🚢 Painel Perigo Imports")
+
+# Teste inicial de conexão para tirar a tela preta
+if "gsheets_connected" not in st.session_state:
+    with st.spinner("Conectando ao banco de dados..."):
+        df_teste = carregar_dados("usuarios")
+        if not df_teste.empty:
+            st.session_state["gsheets_connected"] = True
+            st.success("Conexão estabelecida com sucesso!")
+        else:
+            st.session_state["gsheets_connected"] = False
+
+# Se a conexão falhar, mostra o motivo em vez da tela preta
+if not st.session_state["gsheets_connected"]:
+    st.error("⚠️ Falha na conexão inicial. Verifique se o e-mail da conta de serviço é Editor na sua planilha.")
+    st.info(f"E-mail da conta: perigodata-chaves@perigodata.iam.gserviceaccount.com")
+else:
+    # Lógica de Login/Cadastro simplificada para teste
+    st.write("### Bem-vindo! O sistema está pronto.")
+    # Adicione aqui o restante do seu código de login que enviamos anteriormente
