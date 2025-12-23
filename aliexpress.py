@@ -77,7 +77,7 @@ if not st.session_state['logged_in']:
             df_u = carregar_dados("usuarios")
             novo_u = pd.concat([df_u, pd.DataFrame([{"nome": nome, "usuario": user, "senha": senha}])], ignore_index=True)
             if salvar_dados(novo_u, "usuarios"):
-                st.success("Cadastrado com sucesso! Faz login.")
+                st.success("Cadastrado com sucesso! Faça o login.")
 
 else:
     # --- ÁREA LOGADA ---
@@ -98,8 +98,9 @@ else:
             
             if submit:
                 invest_total = p_custo * p_qtd
-                lucro_total = (p_venda * p_qtd) - invest_total
-                margem = (lucro_total / (p_venda * p_qtd) * 100) if (p_venda * p_qtd) > 0 else 0
+                faturamento_total = p_venda * p_qtd
+                lucro_total = faturamento_total - invest_total
+                margem = (lucro_total / faturamento_total * 100) if faturamento_total > 0 else 0
                 
                 df_d = carregar_dados("dados")
                 nova_linha = pd.DataFrame([{
@@ -127,40 +128,42 @@ else:
 
     st.divider()
     
-    # --- EXIBIÇÃO E GRÁFICO CORRIGIDO ---
+    # --- EXIBIÇÃO E GRÁFICO EMPILHADO (STACKED) ---
     df_visualizar = carregar_dados("dados")
     if not df_visualizar.empty:
         meus_dados = df_visualizar[df_visualizar['usuario'] == st.session_state.username]
         
         if not meus_dados.empty:
-            # Garante que as colunas financeiras são números
             meus_dados["investimento"] = pd.to_numeric(meus_dados["investimento"])
             meus_dados["lucro"] = pd.to_numeric(meus_dados["lucro"])
 
             st.subheader("📋 Teus Lançamentos")
             st.dataframe(meus_dados, use_container_width=True)
 
-            # --- CORREÇÃO DO GRÁFICO ---
-            # Transformamos o DF para o formato longo (Melt) para o Plotly ler os VALORES no eixo Y
+            # Criando o gráfico empilhado
+            # Aqui, a soma das duas partes (Investimento + Lucro) dará o Faturamento Total
             df_plot = meus_dados.melt(
                 id_vars=["produto"], 
                 value_vars=["investimento", "lucro"],
-                var_name="Indicador", 
+                var_name="Composição do Preço", 
                 value_name="Valor_RS"
             )
 
             fig = px.bar(
                 df_plot, 
                 x="produto", 
-                y="Valor_RS", # Agora o Y é o valor em dinheiro
-                color="Indicador", 
-                barmode="group",
-                title="Comparativo Financeiro: Investimento vs Lucro (R$)",
-                labels={"Valor_RS": "Valor em Reais (R$)", "produto": "Produto"},
+                y="Valor_RS", 
+                color="Composição do Preço", 
+                barmode="relative", # 'relative' empilha as barras positivamente
+                title="Faturamento Bruto: Composição de Custo e Lucro (R$)",
+                labels={"Valor_RS": "Preço de Venda Total (R$)", "produto": "Produto"},
                 color_discrete_map={"investimento": "#EF553B", "lucro": "#00CC96"}
             )
             
+            # Adiciona o rótulo do valor total no topo da barra
             fig.update_layout(yaxis_tickprefix="R$ ", yaxis_tickformat=",.2f")
             st.plotly_chart(fig, use_container_width=True)
+            
+            st.info("💡 No gráfico acima, a altura total da barra representa o seu **Faturamento Bruto**. A parte vermelha é o que você gastou e a verde é o que sobrou no seu bolso.")
         else:
             st.info("Ainda não tens dados registados.")
