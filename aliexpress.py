@@ -13,17 +13,17 @@ st.set_page_config(page_title="Painel Perigo Imports", layout="wide")
 
 def conectar_google_sheets(aba_nome):
     try:
-        # Recupera e limpa a string Base64
+        # Recupera e limpa a string Base64 dos secrets
         raw_b64 = st.secrets["gcp_base64"]
         clean_b64 = re.sub(r'[^a-zA-Z0-9+/=]', '', raw_b64)
         
-        # Decodifica para JSON
+        # Decodifica de Base64 para JSON
         decoded_bytes = base64.b64decode(clean_b64)
         json_str = decoded_bytes.decode('utf-8')
         creds_dict = json.loads(json_str)
         
         url = st.secrets["spreadsheet_url"]
-        # Retorna o objeto Spread configurado
+        # Retorna o objeto Spread configurado para a aba desejada
         return Spread(url, config=creds_dict, sheet=aba_nome)
     except Exception as e:
         st.error(f"Erro crítico de conexão: {e}")
@@ -33,9 +33,10 @@ def carregar_dados(aba_nome):
     s = conectar_google_sheets(aba_nome)
     if s:
         try:
-            # MÉTODO CORRETO: sheet_to_df
+            # MÉTODO CORRETO PARA LEITURA: sheet_to_df
             return s.sheet_to_df(index=None)
         except Exception:
+            # Caso a aba esteja vazia ou não exista, cria estrutura básica
             if aba_nome == "usuarios":
                 return pd.DataFrame(columns=["nome", "usuario", "senha"])
             return pd.DataFrame()
@@ -45,17 +46,17 @@ def salvar_dados(df_novo, aba_nome):
     s = conectar_google_sheets(aba_nome)
     if s:
         try:
-            # MÉTODO CORRETO: to_sheet
-            # index=False evita criar uma coluna extra de números na planilha
-            # replace=True substitui o conteúdo antigo pelo novo
-            s.to_sheet(df=df_novo, index=False, replace=True)
+            # MÉTODO CORRETO PARA ESCRITA: df_to_sheet
+            # index=False: não cria coluna de índice na planilha
+            # replace=True: limpa a aba antes de colar os novos dados
+            s.df_to_sheet(df=df_novo, index=False, replace=True)
             return True
         except Exception as e:
             st.error(f"Erro ao salvar na planilha: {e}")
             return False
     return False
 
-# --- LÓGICA DE ACESSO ---
+# --- LÓGICA DE ACESSO (LOGIN / CADASTRO) ---
 
 if 'logged_in' not in st.session_state:
     st.session_state['logged_in'] = False
@@ -76,7 +77,7 @@ if not st.session_state['logged_in']:
                 if p == senha_db:
                     st.session_state.update({"logged_in": True, "username": u})
                     st.rerun()
-            st.error("Dados inválidos.")
+            st.error("Usuário ou senha incorretos.")
             
     else:
         st.title("📝 Cadastro")
@@ -85,27 +86,27 @@ if not st.session_state['logged_in']:
         senha = st.text_input("Senha", type="password")
         if st.button("Finalizar Cadastro"):
             df_u = carregar_dados("usuarios")
-            # Adiciona novo usuário mantendo as colunas
+            # Adiciona o novo registro ao DataFrame existente
             novo_u = pd.concat([df_u, pd.DataFrame([{"nome": nome, "usuario": user, "senha": senha}])], ignore_index=True)
             if salvar_dados(novo_u, "usuarios"):
-                st.success("Cadastro realizado! Mude para o Login.")
+                st.success("Usuário cadastrado com sucesso! Volte para a tela de Login.")
 
 else:
-    # --- DASHBOARD ---
+    # --- DASHBOARD LOGADO ---
     st.sidebar.button("Sair", on_click=lambda: st.session_state.update({"logged_in": False}))
-    st.title(f"🚢 Controle: {st.session_state.username}")
+    st.title(f"🚢 Controle de Importações: {st.session_state.username}")
 
-    with st.expander("➕ Nova Importação", expanded=True):
+    with st.expander("➕ Registrar Novo Item", expanded=True):
         c1, c2, c3 = st.columns(3)
         p_nome = c1.text_input("Produto")
         p_custo = c2.number_input("Custo Unitário (R$)", min_value=0.0)
         p_qtd = c3.number_input("Quantidade", min_value=1)
-        p_margem = st.slider("Margem (%)", 0, 100, 30)
+        p_margem = st.slider("Margem de Lucro (%)", 0, 100, 30)
         
         invest = p_custo * p_qtd
         lucro = (p_custo * (p_margem/100)) * p_qtd
 
-        if st.button("Gravar Dados"):
+        if st.button("Gravar na Planilha"):
             df_d = carregar_dados("dados")
             nova_linha = pd.DataFrame([{
                 "produto": p_nome, "custo": p_custo, "quantidade": p_qtd, 
@@ -113,16 +114,22 @@ else:
                 "lucro": lucro, "usuario": st.session_state.username
             }])
             if salvar_dados(pd.concat([df_d, nova_linha], ignore_index=True), "dados"):
-                st.success("Salvo!")
+                st.success("Lançamento salvo com sucesso!")
                 st.rerun()
 
     st.divider()
+    
+    # Exibição dos dados salvos
     df_g = carregar_dados("dados")
     if not df_g.empty:
+        # Filtra para mostrar apenas os dados do usuário logado
         meus_dados = df_g[df_g['usuario'] == st.session_state.username]
+        st.subheader("📋 Histórico de Lançamentos")
         st.dataframe(meus_dados, use_container_width=True)
         
-        # Gráfico simples de Lucro x Investimento
         if not meus_dados.empty:
-            fig = px.bar(meus_dados, x="produto", y=["investimento", "lucro"], barmode="group", title="Resumo Financeiro por Produto")
+            fig = px.bar(meus_dados, x="produto", y=["investimento", "lucro"], 
+                         barmode="group", title="Resumo Financeiro por Produto")
             st.plotly_chart(fig)
+    else:
+        st.info("Nenhum dado cadastrado até o momento.")
