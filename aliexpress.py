@@ -84,10 +84,68 @@ else:
     st.sidebar.button("Sair", on_click=lambda: st.session_state.update({"logged_in": False}))
     st.title(f"🚢 Controle de Importações: {st.session_state.username}")
 
-    tab1, tab2 = st.tabs(["➕ Adicionar Novo", "🗑️ Gerir Inventário"])
+    # ADICIONADA A ABA DE RESUMO GERAL
+    tab1, tab2, tab3 = st.tabs(["📊 Resumo Geral", "➕ Adicionar Novo", "🗑️ Gerir Inventário"])
+
+    # Carregar dados uma vez para todas as abas
+    df_global = carregar_dados("dados")
+    meus_dados = pd.DataFrame()
+    if not df_global.empty:
+        meus_dados = df_global[df_global['usuario'] == st.session_state.username].copy()
+        if not meus_dados.empty:
+            meus_dados["investimento"] = pd.to_numeric(meus_dados["investimento"])
+            meus_dados["lucro"] = pd.to_numeric(meus_dados["lucro"])
+            if "faturamento" not in meus_dados.columns:
+                meus_dados["faturamento"] = meus_dados["investimento"] + meus_dados["lucro"]
+            else:
+                meus_dados["faturamento"] = pd.to_numeric(meus_dados["faturamento"])
 
     with tab1:
+        st.subheader("💰 Performance Financeira Acumulada")
+        if not meus_dados.empty:
+            total_investido = meus_dados["investimento"].sum()
+            total_retorno = meus_dados["faturamento"].sum()
+            total_lucro = meus_dados["lucro"].sum()
+            roi = (total_lucro / total_investido * 100) if total_investido > 0 else 0
+
+            # Exibição em Cards
+            m1, m2, m3, m4 = st.columns(4)
+            m1.metric("Total Investido", f"R$ {total_investido:,.2f}")
+            m2.metric("Retorno Esperado", f"R$ {total_retorno:,.2f}", delta=f"R$ {total_lucro:,.2f}")
+            m3.metric("Lucro Líquido", f"R$ {total_lucro:,.2f}")
+            m4.metric("ROI Geral", f"{roi:.1f}%")
+
+            st.divider()
+            
+            # Gráfico de Crescimento (Azul Escuro vs Azul Claro)
+            df_plot = meus_dados.melt(
+                id_vars=["produto"], 
+                value_vars=["investimento", "faturamento"],
+                var_name="Tipo", 
+                value_name="Valor_RS"
+            )
+
+            fig = px.bar(
+                df_plot, 
+                x="produto", 
+                y="Valor_RS", 
+                color="Tipo", 
+                barmode="group",
+                title="Investimento vs. Faturamento por Produto",
+                labels={"Valor_RS": "Valor (R$)", "produto": "Produto"},
+                color_discrete_map={"investimento": "#1A237E", "faturamento": "#4FC3F7"}
+            )
+            fig.update_layout(yaxis_tickprefix="R$ ", yaxis_tickformat=",.2f")
+            st.plotly_chart(fig, use_container_width=True)
+            
+            st.subheader("📋 Detalhes do Inventário")
+            st.dataframe(meus_dados, use_container_width=True)
+        else:
+            st.info("Nenhum dado cadastrado para gerar o resumo.")
+
+    with tab2:
         with st.form("form_adicionar"):
+            st.subheader("Cadastrar Nova Compra")
             c1, c2, c3 = st.columns(3)
             p_nome = c1.text_input("Produto")
             p_custo = c2.number_input("Custo Unitário (R$)", min_value=0.0, format="%.2f")
@@ -102,7 +160,6 @@ else:
                 lucro_total = faturamento_total - invest_total
                 margem = (lucro_total / faturamento_total * 100) if faturamento_total > 0 else 0
                 
-                df_d = carregar_dados("dados")
                 nova_linha = pd.DataFrame([{
                     "produto": p_nome, 
                     "custo": p_custo, 
@@ -114,67 +171,18 @@ else:
                     "lucro": float(lucro_total), 
                     "usuario": st.session_state.username
                 }])
-                if salvar_dados(pd.concat([df_d, nova_linha], ignore_index=True), "dados"):
+                if salvar_dados(pd.concat([df_global, nova_linha], ignore_index=True), "dados"):
                     st.success("Dados Gravados!")
                     st.rerun()
 
-    with tab2:
+    with tab3:
         st.subheader("Remover Itens")
-        df_g = carregar_dados("dados")
-        if not df_g.empty:
-            meus_itens = df_g[df_g['usuario'] == st.session_state.username]
-            if not meus_itens.empty:
-                item_para_deletar = st.selectbox("Escolha o item para apagar:", meus_itens['produto'].unique())
-                if st.button("❌ Confirmar Exclusão", type="primary"):
-                    df_final = df_g.drop(df_g[(df_g['usuario'] == st.session_state.username) & (df_g['produto'] == item_para_deletar)].index)
-                    if salvar_dados(df_final, "dados"):
-                        st.warning(f"Item '{item_para_deletar}' removido!")
-                        st.rerun()
-
-    st.divider()
-    
-    # --- EXIBIÇÃO E GRÁFICO (AZUL ESCURO E AZUL CLARO) ---
-    df_visualizar = carregar_dados("dados")
-    if not df_visualizar.empty:
-        meus_dados = df_visualizar[df_visualizar['usuario'] == st.session_state.username]
-        
         if not meus_dados.empty:
-            meus_dados["investimento"] = pd.to_numeric(meus_dados["investimento"])
-            
-            # Cálculo de segurança para garantir a coluna faturamento
-            if "faturamento" not in meus_dados.columns:
-                meus_dados["faturamento"] = meus_dados["investimento"] + pd.to_numeric(meus_dados["lucro"])
-            else:
-                meus_dados["faturamento"] = pd.to_numeric(meus_dados["faturamento"])
-
-            st.subheader("📋 Meus Lançamentos")
-            st.dataframe(meus_dados, use_container_width=True)
-
-            # Transformação para o formato longo (Melt)
-            df_plot = meus_dados.melt(
-                id_vars=["produto"], 
-                value_vars=["investimento", "faturamento"],
-                var_name="Tipo", 
-                value_name="Valor_RS"
-            )
-
-            # --- AJUSTE DE CORES: AZUL ESCURO E AZUL CLARO ---
-            fig = px.bar(
-                df_plot, 
-                x="produto", 
-                y="Valor_RS", 
-                color="Tipo", 
-                barmode="group",
-                title="Crescimento Financeiro: Investimento vs. Faturamento (R$)",
-                labels={"Valor_RS": "Valor (R$)", "produto": "Produto"},
-                color_discrete_map={
-                    "investimento": "#1A237E", # Azul Escuro (Indigo)
-                    "faturamento": "#4FC3F7"   # Azul Claro (Sky Blue)
-                }
-            )
-            
-            fig.update_layout(yaxis_tickprefix="R$ ", yaxis_tickformat=",.2f")
-            st.plotly_chart(fig, use_container_width=True)
-            
+            item_para_deletar = st.selectbox("Escolha o item para apagar:", meus_itens_lista := meus_dados['produto'].unique())
+            if st.button("❌ Confirmar Exclusão", type="primary"):
+                df_final = df_global.drop(df_global[(df_global['usuario'] == st.session_state.username) & (df_global['produto'] == item_para_deletar)].index)
+                if salvar_dados(df_final, "dados"):
+                    st.warning(f"Item '{item_para_deletar}' removido!")
+                    st.rerun()
         else:
-            st.info("Ainda não tens dados registados.")
+            st.info("Nada para apagar.")
