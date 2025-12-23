@@ -2,18 +2,19 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 from gspread_pandas import Spread
-import os
+import base64
 
 st.set_page_config(page_title="Sistema de Importação", layout="wide")
 
-# --- FUNÇÃO DE CONEXÃO DIRETA (SEM ST.CONNECTION) ---
 def carregar_dados(aba_nome):
     try:
-        # Pegamos os dados do segredo e limpamos a chave
         creds = st.secrets["connections"]["gsheets"].to_dict()
-        creds["private_key"] = creds["private_key"].replace("\\n", "\n")
+        # Limpeza profunda da chave para evitar erro de Base64
+        pk = creds["private_key"].replace("\\n", "\n").strip()
+        # Remove possíveis espaços ou caracteres invisíveis entre as linhas
+        pk = "\n".join([line.strip() for line in pk.split("\n")])
+        creds["private_key"] = pk
         
-        # Conectamos usando gspread-pandas que aceita o dicionário direto
         s = Spread(st.secrets["spreadsheet_url"], config=creds, sheet=aba_nome)
         return s.df
     except Exception as e:
@@ -22,14 +23,18 @@ def carregar_dados(aba_nome):
 def salvar_dados(df_novo, aba_nome):
     try:
         creds = st.secrets["connections"]["gsheets"].to_dict()
-        creds["private_key"] = creds["private_key"].replace("\\n", "\n")
+        pk = creds["private_key"].replace("\\n", "\n").strip()
+        pk = "\n".join([line.strip() for line in pk.split("\n")])
+        creds["private_key"] = pk
+        
         s = Spread(st.secrets["spreadsheet_url"], config=creds, sheet=aba_nome)
         s.df = df_novo
         s.save_to_sheet(index=False, replace=True)
+        return True
     except Exception as e:
-        st.error(f"Erro ao salvar: {e}")
+        st.error(f"Erro técnico ao salvar: {e}")
+        return False
 
-# --- LÓGICA DE LOGIN ---
 if 'logged_in' not in st.session_state:
     st.session_state['logged_in'] = False
 
@@ -46,21 +51,18 @@ if not st.session_state['logged_in']:
             if not df_usuarios.empty and user in df_usuarios['usuario'].astype(str).values:
                 senha_correta = str(df_usuarios[df_usuarios['usuario'] == user]['senha'].values[0])
                 if pw == senha_correta:
-                    st.session_state['logged_in'] = True
-                    st.session_state['username'] = user
+                    st.session_state.update({"logged_in": True, "username": user})
                     st.rerun()
             st.error("Usuário ou senha inválidos.")
-
     else:
         st.title("📝 Cadastro")
-        n = st.text_input("Nome")
-        u = st.text_input("Usuário")
-        p = st.text_input("Senha", type="password")
+        n, u, p = st.text_input("Nome"), st.text_input("Usuário"), st.text_input("Senha", type="password")
         if st.button("Finalizar Cadastro"):
             df_u = carregar_dados("usuarios")
             novo = pd.DataFrame([{"nome": n, "usuario": u, "senha": p}])
-            salvar_dados(pd.concat([df_u, novo], ignore_index=True), "usuarios")
-            st.success("Cadastrado com sucesso! Mude para Login.")
+            sucesso = salvar_dados(pd.concat([df_u, novo], ignore_index=True), "usuarios")
+            if sucesso:
+                st.success("Cadastrado com sucesso! Mude para Login.")
 
 else:
     st.sidebar.write(f"Logado como: **{st.session_state.username}**")
@@ -69,10 +71,8 @@ else:
         st.rerun()
 
     st.title("🚢 Controle de Importações")
-
-    # Painel de Entrada
-    with st.expander("➕ Novo Item", expanded=True):
-        c1, c2, c3 = st.columns([3, 1, 1])
+    with st.expander("➕ Novo Item"):
+        c1, c2, c3 = st.columns(3)
         nome_p = c1.text_input("Produto")
         custo_u = c2.number_input("Custo (R$)", min_value=0.0)
         quant = c3.number_input("Qtd", min_value=1)
@@ -84,16 +84,11 @@ else:
 
         if st.button("Salvar Registro"):
             df_d = carregar_dados("dados")
-            nova_l = pd.DataFrame([{
-                "produto": nome_p, "custo": custo_u, "quantidade": quant,
-                "margem": margem, "investimento": invest, "lucro": lucro_e,
-                "usuario": st.session_state.username
-            }])
-            salvar_dados(pd.concat([df_d, nova_l], ignore_index=True), "dados")
-            st.success("Salvo!")
-            st.rerun()
+            nova_l = pd.DataFrame([{"produto": nome_p, "custo": custo_u, "quantidade": quant, "margem": margem, "investimento": invest, "lucro": lucro_e, "usuario": st.session_state.username}])
+            if salvar_dados(pd.concat([df_d, nova_l], ignore_index=True), "dados"):
+                st.success("Salvo!")
+                st.rerun()
 
-    # Dashboard
     st.divider()
     m1, m2, m3 = st.columns(3)
     m1.metric("Investimento", f"R$ {invest:,.2f}")
