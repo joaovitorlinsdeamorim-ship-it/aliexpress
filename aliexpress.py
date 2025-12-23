@@ -104,9 +104,14 @@ else:
                 
                 df_d = carregar_dados("dados")
                 nova_linha = pd.DataFrame([{
-                    "produto": p_nome, "custo": p_custo, "quantidade": p_qtd, 
-                    "venda": p_venda, "margem": f"{margem:.2f}%", 
-                    "investimento": float(invest_total), "lucro": float(lucro_total), 
+                    "produto": p_nome, 
+                    "custo": p_custo, 
+                    "quantidade": p_qtd, 
+                    "venda": p_venda, 
+                    "margem": f"{margem:.2f}%", 
+                    "investimento": float(invest_total), 
+                    "faturamento": float(faturamento_total), # Salvamos o total bruto
+                    "lucro": float(lucro_total), 
                     "usuario": st.session_state.username
                 }])
                 if salvar_dados(pd.concat([df_d, nova_linha], ignore_index=True), "dados"):
@@ -128,24 +133,29 @@ else:
 
     st.divider()
     
-    # --- EXIBIÇÃO E GRÁFICO EMPILHADO (STACKED) ---
+    # --- EXIBIÇÃO E GRÁFICO DE CRESCIMENTO (INVESTIMENTO VS FATURAMENTO) ---
     df_visualizar = carregar_dados("dados")
     if not df_visualizar.empty:
         meus_dados = df_visualizar[df_visualizar['usuario'] == st.session_state.username]
         
         if not meus_dados.empty:
+            # Garantir que são números para o gráfico não bugar
             meus_dados["investimento"] = pd.to_numeric(meus_dados["investimento"])
-            meus_dados["lucro"] = pd.to_numeric(meus_dados["lucro"])
+            # Se a coluna faturamento não existir em registros antigos, calculamos na hora:
+            if "faturamento" not in meus_dados.columns:
+                meus_dados["faturamento"] = meus_dados["investimento"] + pd.to_numeric(meus_dados["lucro"])
+            else:
+                meus_dados["faturamento"] = pd.to_numeric(meus_dados["faturamento"])
 
             st.subheader("📋 Teus Lançamentos")
             st.dataframe(meus_dados, use_container_width=True)
 
-            # Criando o gráfico empilhado
-            # Aqui, a soma das duas partes (Investimento + Lucro) dará o Faturamento Total
+            # Criando o gráfico LADO A LADO (Vertical)
+            # Comparamos o que saiu do bolso (Investimento) com o que entrou total (Faturamento)
             df_plot = meus_dados.melt(
                 id_vars=["produto"], 
-                value_vars=["investimento", "lucro"],
-                var_name="Composição do Preço", 
+                value_vars=["investimento", "faturamento"],
+                var_name="Tipo", 
                 value_name="Valor_RS"
             )
 
@@ -153,17 +163,16 @@ else:
                 df_plot, 
                 x="produto", 
                 y="Valor_RS", 
-                color="Composição do Preço", 
-                barmode="relative", # 'relative' empilha as barras positivamente
-                title="Faturamento Bruto: Composição de Custo e Lucro (R$)",
-                labels={"Valor_RS": "Preço de Venda Total (R$)", "produto": "Produto"},
-                color_discrete_map={"investimento": "#EF553B", "lucro": "#00CC96"}
+                color="Tipo", 
+                barmode="group", # Barras verticais lado a lado
+                title="Crescimento Financeiro: Investimento vs. Retorno Bruto (R$)",
+                labels={"Valor_RS": "Valor em Reais (R$)", "produto": "Produto"},
+                color_discrete_map={"investimento": "#EF553B", "faturamento": "#00CC96"} # Vermelho vs Verde
             )
             
-            # Adiciona o rótulo do valor total no topo da barra
             fig.update_layout(yaxis_tickprefix="R$ ", yaxis_tickformat=",.2f")
             st.plotly_chart(fig, use_container_width=True)
             
-            st.info("💡 No gráfico acima, a altura total da barra representa o seu **Faturamento Bruto**. A parte vermelha é o que você gastou e a verde é o que sobrou no seu bolso.")
+            st.info("💡 A barra **Vermelha** mostra o seu custo (investimento). A barra **Verde** mostra o valor total da venda (Custo + Lucro). A diferença de altura entre elas é o seu lucro real.")
         else:
             st.info("Ainda não tens dados registados.")
