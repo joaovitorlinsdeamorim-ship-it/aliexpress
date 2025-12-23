@@ -9,19 +9,15 @@ import re
 # 1. Configuração da Página
 st.set_page_config(page_title="Painel Perigo Imports", layout="wide")
 
-# --- FUNÇÕES DE CONEXÃO E LIMPEZA ---
+# --- FUNÇÕES DE CONEXÃO ---
 
 def conectar_google_sheets(aba_nome):
     try:
-        # Recupera e limpa a string Base64 dos secrets
         raw_b64 = st.secrets["gcp_base64"]
         clean_b64 = re.sub(r'[^a-zA-Z0-9+/=]', '', raw_b64)
-        
-        # Decodifica de Base64 para JSON
         decoded_bytes = base64.b64decode(clean_b64)
         json_str = decoded_bytes.decode('utf-8')
         creds_dict = json.loads(json_str)
-        
         url = st.secrets["spreadsheet_url"]
         return Spread(url, config=creds_dict, sheet=aba_nome)
     except Exception as e:
@@ -32,10 +28,8 @@ def carregar_dados(aba_nome):
     s = conectar_google_sheets(aba_nome)
     if s:
         try:
-            # Puxa os dados da aba para um DataFrame
             return s.sheet_to_df(index=None)
         except Exception:
-            # Caso a aba esteja vazia ou não exista, cria estrutura básica
             if aba_nome == "usuarios":
                 return pd.DataFrame(columns=["nome", "usuario", "senha"])
             return pd.DataFrame()
@@ -45,7 +39,6 @@ def salvar_dados(df_novo, aba_nome):
     s = conectar_google_sheets(aba_nome)
     if s:
         try:
-            # Salva o DataFrame na aba correspondente
             s.df_to_sheet(df=df_novo, index=False, replace=True)
             return True
         except Exception as e:
@@ -53,7 +46,7 @@ def salvar_dados(df_novo, aba_nome):
             return False
     return False
 
-# --- LOGICA DE ACESSO (LOGIN / CADASTRO) ---
+# --- LÓGICA DE ACESSO ---
 
 if 'logged_in' not in st.session_state:
     st.session_state['logged_in'] = False
@@ -75,7 +68,6 @@ if not st.session_state['logged_in']:
                     st.session_state.update({"logged_in": True, "username": u})
                     st.rerun()
             st.error("Usuário ou senha incorretos.")
-            
     else:
         st.title("📝 Cadastro")
         nome = st.text_input("Nome Completo")
@@ -85,73 +77,75 @@ if not st.session_state['logged_in']:
             df_u = carregar_dados("usuarios")
             novo_u = pd.concat([df_u, pd.DataFrame([{"nome": nome, "usuario": user, "senha": senha}])], ignore_index=True)
             if salvar_dados(novo_u, "usuarios"):
-                st.success("Usuário cadastrado com sucesso! Volte para a tela de Login.")
+                st.success("Cadastrado com sucesso!")
 
 else:
-    # --- ÁREA LOGADA: DASHBOARD ---
+    # --- ÁREA LOGADA ---
     st.sidebar.button("Sair", on_click=lambda: st.session_state.update({"logged_in": False}))
     st.title(f"🚢 Controle de Importações: {st.session_state.username}")
 
-    with st.expander("➕ Registrar Novo Item", expanded=True):
-        c1, c2, c3 = st.columns(3)
-        p_nome = c1.text_input("Nome do Produto")
-        p_custo = c2.number_input("Custo Unitário de Compra (R$)", min_value=0.0, format="%.2f")
-        p_qtd = c3.number_input("Quantidade Comprada", min_value=1)
-        
-        # CAMPO NOVO: Preço de Venda Final
-        p_venda = st.number_input("Preço de Venda Unitário (R$)", min_value=0.0, format="%.2f")
-        
-        # CÁLCULOS AUTOMÁTICOS
-        investimento_total = p_custo * p_qtd
-        faturamento_total = p_venda * p_qtd
-        lucro_total = faturamento_total - investimento_total
-        
-        # Margem de lucro sobre o preço de venda (Fórmula Comercial)
-        # 
-        margem_calculada = (lucro_total / faturamento_total * 100) if faturamento_total > 0 else 0.0
+    # Aba para Adicionar Itens
+    tab1, tab2 = st.tabs(["➕ Adicionar Novo", "🗑️ Gerir Inventário"])
 
-        # Resumo dos cálculos antes de gravar
-        st.write("---")
-        col_res1, col_res2, col_res3 = st.columns(3)
-        col_res1.metric("Margem Estimada", f"{margem_calculada:.2f}%")
-        col_res2.metric("Investimento Total", f"R$ {investimento_total:,.2f}")
-        col_res3.metric("Lucro Final", f"R$ {lucro_total:,.2f}")
+    with tab1:
+        with st.form("form_adicionar"):
+            c1, c2, c3 = st.columns(3)
+            p_nome = c1.text_input("Produto")
+            p_custo = c2.number_input("Custo Unitário (R$)", min_value=0.0, format="%.2f")
+            p_qtd = c3.number_input("Quantidade", min_value=1)
+            p_venda = st.number_input("Preço de Venda Unitário (R$)", min_value=0.0, format="%.2f")
+            
+            submit = st.form_submit_button("Gravar na Planilha")
+            
+            if submit:
+                invest_total = p_custo * p_qtd
+                lucro_total = (p_venda * p_qtd) - invest_total
+                margem = (lucro_total / (p_venda * p_qtd) * 100) if p_venda > 0 else 0
+                
+                df_d = carregar_dados("dados")
+                nova_linha = pd.DataFrame([{
+                    "produto": p_nome, "custo": p_custo, "quantidade": p_qtd, 
+                    "venda": p_venda, "margem": f"{margem:.2f}%", 
+                    "investimento": invest_total, "lucro": lucro_total, 
+                    "usuario": st.session_state.username
+                }])
+                if salvar_dados(pd.concat([df_d, nova_linha], ignore_index=True), "dados"):
+                    st.success("Salvo!")
+                    st.rerun()
 
-        if st.button("Gravar na Planilha"):
-            df_d = carregar_dados("dados")
-            nova_linha = pd.DataFrame([{
-                "produto": p_nome, 
-                "custo": p_custo, 
-                "quantidade": p_qtd, 
-                "venda": p_venda,
-                "margem": f"{margem_calculada:.2f}%", 
-                "investimento": investimento_total, 
-                "lucro": lucro_total, 
-                "usuario": st.session_state.username
-            }])
-            if salvar_dados(pd.concat([df_d, nova_linha], ignore_index=True), "dados"):
-                st.success("Lançamento salvo!")
-                st.rerun()
+    # NOVA FUNCIONALIDADE: DELETAR ITENS
+    with tab2:
+        st.subheader("Remover Itens do Sistema")
+        df_g = carregar_dados("dados")
+        
+        if not df_g.empty:
+            # Filtra apenas os itens do usuário atual
+            meus_itens = df_g[df_g['usuario'] == st.session_state.username]
+            
+            if not meus_itens.empty:
+                item_para_deletar = st.selectbox("Selecione o produto para apagar:", meus_itens['produto'].unique())
+                
+                if st.button("❌ Confirmar Exclusão", type="primary"):
+                    # Remove a linha onde o usuário e o produto coincidem
+                    df_final = df_g.drop(df_g[(df_g['usuario'] == st.session_state.username) & (df_g['produto'] == item_para_deletar)].index)
+                    
+                    if salvar_dados(df_final, "dados"):
+                        st.warning(f"O produto '{item_para_deletar}' foi removido.")
+                        st.rerun()
+            else:
+                st.info("Não tens itens para apagar.")
+        else:
+            st.info("Planilha vazia.")
 
     st.divider()
     
-    # EXIBIÇÃO E GRÁFICOS
-    df_g = carregar_dados("dados")
-    if not df_g.empty:
-        meus_dados = df_g[df_g['usuario'] == st.session_state.username]
-        st.subheader("📋 Meus Lançamentos")
+    # EXIBIÇÃO FINAL
+    st.subheader("📋 Teus Lançamentos")
+    df_visualizar = carregar_dados("dados")
+    if not df_visualizar.empty:
+        meus_dados = df_visualizar[df_visualizar['usuario'] == st.session_state.username]
         st.dataframe(meus_dados, use_container_width=True)
         
         if not meus_dados.empty:
-            # Gráfico de barras comparativo
-            fig = px.bar(
-                meus_dados, 
-                x="produto", 
-                y=["investimento", "lucro"], 
-                barmode="group", 
-                title="Custo vs Lucro por Produto",
-                labels={"value": "Reais (R$)", "variable": "Indicador"}
-            )
+            fig = px.bar(meus_dados, x="produto", y=["investimento", "lucro"], barmode="group", title="Resumo Financeiro")
             st.plotly_chart(fig, use_container_width=True)
-    else:
-        st.info("Nenhum dado cadastrado.")
