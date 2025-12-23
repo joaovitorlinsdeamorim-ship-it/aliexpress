@@ -5,25 +5,20 @@ import plotly.express as px
 
 st.set_page_config(page_title="Sistema de Importação", layout="wide")
 
-# MUDANÇA AQUI: Criamos um dicionário de configuração a partir dos secrets
-# e corrigimos a chave apenas nesse dicionário temporário
-if "connections" in st.secrets and "gsheets" in st.secrets.connections:
-    secret_info = st.secrets.connections.gsheets.to_dict()
-    if "private_key" in secret_info:
-        secret_info["private_key"] = secret_info["private_key"].replace("\\n", "\n")
-else:
-    st.error("Configurações de conexão não encontradas nos Secrets.")
+# Conectando diretamente (O Streamlit cuidará da chave se ela estiver correta no Secrets)
+try:
+    conn = st.connection("gsheets", type=GSheetsConnection)
+except Exception as e:
+    st.error("Erro na conexão. Verifique se os Secrets estão preenchidos corretamente.")
     st.stop()
-
-# Criamos a conexão passando as configurações corrigidas
-conn = st.connection("gsheets", type=GSheetsConnection, **secret_info)
 
 URL_PLANILHA = "SUA_URL_DA_PLANILHA_AQUI"
 
 def carregar_dados(aba):
     try:
-        return conn.read(spreadsheet=URL_PLANILHA, worksheet=aba)
-    except Exception as e:
+        # Forçamos o cache em 0 para os dados atualizarem sempre
+        return conn.read(spreadsheet=URL_PLANILHA, worksheet=aba, ttl=0)
+    except:
         return pd.DataFrame()
 
 if 'logged_in' not in st.session_state:
@@ -40,7 +35,9 @@ if not st.session_state['logged_in']:
         if st.button("Entrar"):
             df_usuarios = carregar_dados("usuarios")
             if not df_usuarios.empty and user in df_usuarios['usuario'].values:
-                senha_correta = str(df_usuarios[df_usuarios['usuario'] == user]['senha'].values[0])
+                # Localiza a senha e converte para string para comparar
+                linha_user = df_usuarios[df_usuarios['usuario'] == user]
+                senha_correta = str(linha_user['senha'].values[0])
                 if pw == senha_correta:
                     st.session_state['logged_in'] = True
                     st.session_state['username'] = user
@@ -57,7 +54,7 @@ if not st.session_state['logged_in']:
             novo_registro = pd.DataFrame([{"nome": novo_nome, "usuario": novo_user, "senha": nova_pw}])
             df_final = pd.concat([df_usuarios, novo_registro], ignore_index=True)
             conn.update(spreadsheet=URL_PLANILHA, worksheet="usuarios", data=df_final)
-            st.success("Cadastro realizado!")
+            st.success("Cadastro realizado! Mude para Login.")
 
 else:
     st.sidebar.write(f"Usuário: **{st.session_state.username}**")
@@ -96,11 +93,14 @@ else:
     m2.metric("Venda Unit.", f"R$ {venda_u:,.2f}")
     m3.metric("Lucro Est.", f"R$ {lucro_e:,.2f}")
 
-    c_data = pd.DataFrame({"Cat": ["Custo", "Lucro"], "Val": [invest, lucro_e]})
+    # Gráfico simples
+    c_data = pd.DataFrame({"Cat": ["Custo", "Lucro"], "Val": [max(0.1, invest), max(0.1, lucro_e)]})
     fig = px.pie(c_data, values='Val', names='Cat', hole=0.4, color_discrete_sequence=['#EF553B', '#00CC96'])
     st.plotly_chart(fig)
 
     st.subheader("📋 Meus Itens")
     df_g = carregar_dados("dados")
-    if not df_g.empty:
+    if not df_g.empty and 'usuario' in df_g.columns:
         st.dataframe(df_g[df_g['usuario'] == st.session_state.username], use_container_width=True)
+    else:
+        st.info("Nenhum item encontrado.")
