@@ -5,16 +5,25 @@ import plotly.express as px
 
 st.set_page_config(page_title="Sistema de Importação", layout="wide")
 
+# MUDANÇA AQUI: Criamos um dicionário de configuração a partir dos secrets
+# e corrigimos a chave apenas nesse dicionário temporário
 if "connections" in st.secrets and "gsheets" in st.secrets.connections:
-    st.secrets.connections.gsheets["private_key"] = st.secrets.connections.gsheets["private_key"].replace("\\n", "\n")
+    secret_info = st.secrets.connections.gsheets.to_dict()
+    if "private_key" in secret_info:
+        secret_info["private_key"] = secret_info["private_key"].replace("\\n", "\n")
+else:
+    st.error("Configurações de conexão não encontradas nos Secrets.")
+    st.stop()
 
-conn = st.connection("gsheets", type=GSheetsConnection)
+# Criamos a conexão passando as configurações corrigidas
+conn = st.connection("gsheets", type=GSheetsConnection, **secret_info)
+
 URL_PLANILHA = "SUA_URL_DA_PLANILHA_AQUI"
 
 def carregar_dados(aba):
     try:
         return conn.read(spreadsheet=URL_PLANILHA, worksheet=aba)
-    except:
+    except Exception as e:
         return pd.DataFrame()
 
 if 'logged_in' not in st.session_state:
