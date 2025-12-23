@@ -1,18 +1,27 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-from gspread_pandas import Spread
+from gspread_pandas import Spread, Client
 import json
+import io
 
 st.set_page_config(page_title="Sistema de Importação", layout="wide")
 
+# --- FUNÇÃO DE CONEXÃO AJUSTADA ---
 def carregar_dados(aba_nome):
     try:
-        # Lemos a credencial como um JSON puro
-        creds_dict = json.loads(st.secrets["gcp_service_account"])
+        # Lemos a string do segredo
+        creds_info = st.secrets["gcp_service_account"]
+        # Transformamos a string em um dicionário real
+        creds_dict = json.loads(creds_info)
+        
+        # Conectamos usando o dicionário diretamente
         s = Spread(st.secrets["spreadsheet_url"], config=creds_dict, sheet=aba_nome)
         return s.df
     except Exception as e:
+        # Se a planilha estiver vazia, retorna DF com colunas padrão
+        if aba_nome == "usuarios":
+            return pd.DataFrame(columns=["nome", "usuario", "senha"])
         return pd.DataFrame()
 
 def salvar_dados(df_novo, aba_nome):
@@ -20,6 +29,7 @@ def salvar_dados(df_novo, aba_nome):
         creds_dict = json.loads(st.secrets["gcp_service_account"])
         s = Spread(st.secrets["spreadsheet_url"], config=creds_dict, sheet=aba_nome)
         s.df = df_novo
+        # Salva garantindo que substitua o conteúdo antigo
         s.save_to_sheet(index=False, replace=True)
         return True
     except Exception as e:
@@ -36,25 +46,27 @@ if not st.session_state['logged_in']:
 
     if opcao == "Login":
         st.title("🔐 Login")
-        u, p = st.text_input("Usuário"), st.text_input("Senha", type="password")
+        user = st.text_input("Usuário")
+        pw = st.text_input("Senha", type="password")
         if st.button("Entrar"):
             df_u = carregar_dados("usuarios")
-            if not df_u.empty and u in df_u['usuario'].astype(str).values:
-                senha = str(df_u[df_u['usuario'] == u]['senha'].values[0])
-                if p == senha:
-                    st.session_state.update({"logged_in": True, "username": u})
+            if not df_u.empty and user in df_u['usuario'].astype(str).values:
+                senha_correta = str(df_u[df_u['usuario'] == user]['senha'].values[0])
+                if pw == senha_correta:
+                    st.session_state.update({"logged_in": True, "username": user})
                     st.rerun()
             st.error("Usuário ou senha inválidos.")
     else:
         st.title("📝 Cadastro")
-        n, user, pw = st.text_input("Nome"), st.text_input("Usuário"), st.text_input("Senha", type="password")
+        n, u, p = st.text_input("Nome"), st.text_input("Usuário"), st.text_input("Senha", type="password")
         if st.button("Finalizar Cadastro"):
             df_u = carregar_dados("usuarios")
-            novo = pd.concat([df_u, pd.DataFrame([{"nome": n, "usuario": user, "senha": pw}])], ignore_index=True)
-            if salvar_dados(novo, "usuarios"):
+            novo_df = pd.concat([df_u, pd.DataFrame([{"nome": n, "usuario": u, "senha": p}])], ignore_index=True)
+            if salvar_dados(novo_df, "usuarios"):
                 st.success("Cadastrado! Mude para Login.")
 
 else:
+    # --- PAINEL PRINCIPAL ---
     st.sidebar.button("Sair", on_click=lambda: st.session_state.update({"logged_in": False}))
     st.title(f"🚢 Painel: {st.session_state.username}")
 
@@ -70,8 +82,8 @@ else:
 
         if st.button("Gravar"):
             df_d = carregar_dados("dados")
-            novo_d = pd.concat([df_d, pd.DataFrame([{"produto": prod, "custo": custo, "quantidade": qtd, "margem": margem, "investimento": invest, "lucro": lucro, "usuario": st.session_state.username}])], ignore_index=True)
-            if salvar_dados(novo_d, "dados"):
+            nova_linha = pd.DataFrame([{"produto": prod, "custo": custo, "quantidade": qtd, "margem": margem, "investimento": invest, "lucro": lucro, "usuario": st.session_state.username}])
+            if salvar_dados(pd.concat([df_d, nova_linha], ignore_index=True), "dados"):
                 st.success("Gravado!")
                 st.rerun()
 
