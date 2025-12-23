@@ -110,7 +110,7 @@ else:
                     "venda": p_venda, 
                     "margem": f"{margem:.2f}%", 
                     "investimento": float(invest_total), 
-                    "faturamento": float(faturamento_total), # Salvamos o total bruto
+                    "faturamento": float(faturamento_total),
                     "lucro": float(lucro_total), 
                     "usuario": st.session_state.username
                 }])
@@ -133,25 +133,24 @@ else:
 
     st.divider()
     
-    # --- EXIBIÇÃO E GRÁFICO DE CRESCIMENTO (INVESTIMENTO VS FATURAMENTO) ---
+    # --- EXIBIÇÃO E GRÁFICO (AZUL ESCURO E AZUL CLARO) ---
     df_visualizar = carregar_dados("dados")
     if not df_visualizar.empty:
         meus_dados = df_visualizar[df_visualizar['usuario'] == st.session_state.username]
         
         if not meus_dados.empty:
-            # Garantir que são números para o gráfico não bugar
             meus_dados["investimento"] = pd.to_numeric(meus_dados["investimento"])
-            # Se a coluna faturamento não existir em registros antigos, calculamos na hora:
+            
+            # Cálculo de segurança para garantir a coluna faturamento
             if "faturamento" not in meus_dados.columns:
                 meus_dados["faturamento"] = meus_dados["investimento"] + pd.to_numeric(meus_dados["lucro"])
             else:
                 meus_dados["faturamento"] = pd.to_numeric(meus_dados["faturamento"])
 
-            st.subheader("📋 Teus Lançamentos")
+            st.subheader("📋 Meus Lançamentos")
             st.dataframe(meus_dados, use_container_width=True)
 
-            # Criando o gráfico LADO A LADO (Vertical)
-            # Comparamos o que saiu do bolso (Investimento) com o que entrou total (Faturamento)
+            # Transformação para o formato longo (Melt)
             df_plot = meus_dados.melt(
                 id_vars=["produto"], 
                 value_vars=["investimento", "faturamento"],
@@ -159,20 +158,23 @@ else:
                 value_name="Valor_RS"
             )
 
+            # --- AJUSTE DE CORES: AZUL ESCURO E AZUL CLARO ---
             fig = px.bar(
                 df_plot, 
                 x="produto", 
                 y="Valor_RS", 
                 color="Tipo", 
-                barmode="group", # Barras verticais lado a lado
-                title="Crescimento Financeiro: Investimento vs. Retorno Bruto (R$)",
-                labels={"Valor_RS": "Valor em Reais (R$)", "produto": "Produto"},
-                color_discrete_map={"investimento": "#EF553B", "faturamento": "#00CC96"} # Vermelho vs Verde
+                barmode="group",
+                title="Crescimento Financeiro: Investimento vs. Faturamento (R$)",
+                labels={"Valor_RS": "Valor (R$)", "produto": "Produto"},
+                color_discrete_map={
+                    "investimento": "#1A237E", # Azul Escuro (Indigo)
+                    "faturamento": "#4FC3F7"   # Azul Claro (Sky Blue)
+                }
             )
             
             fig.update_layout(yaxis_tickprefix="R$ ", yaxis_tickformat=",.2f")
             st.plotly_chart(fig, use_container_width=True)
             
-            st.info("💡 A barra **Vermelha** mostra o seu custo (investimento). A barra **Verde** mostra o valor total da venda (Custo + Lucro). A diferença de altura entre elas é o seu lucro real.")
         else:
             st.info("Ainda não tens dados registados.")
